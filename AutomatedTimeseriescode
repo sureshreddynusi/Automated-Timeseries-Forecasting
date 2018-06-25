@@ -1,0 +1,154 @@
+#importing the libraries
+import pandas as pd
+from dateutil.relativedelta import relativedelta
+import numpy as np
+from statsmodels.tsa.arima_model import ARIMA
+from sklearn.metrics import mean_squared_error
+import statsmodels.api as sm
+import itertools
+import warnings 
+import copy
+
+
+#ARIMA model for the best order based on the minimum MSE
+def evaluate_arima_model(X,arima_order):
+    #training data preparation
+    train_size=int(len(X)*0.80)
+    train,test=X[0:train_size],X[train_size:]
+    history=[x for x in train]
+    #predicting for the test data
+    predictions = list()
+    for t in range(len(test)):
+        model=ARIMA(history,order=arima_order)
+        model_fit=model.fit(disp=0)
+        yhat=model_fit.forecast()[0]
+        predictions.append(yhat)
+        history.append(test[t])
+    #calculate the MSE Value
+    error = mean_squared_error(test,predictions)
+    return error
+
+#evaluate combinations of p,d and q values for the ARIMA model
+def evaluate_models(dataset,p_values,d_values,q_values):
+    dataset=dataset.astype('float32')
+    best_score=float('inf')
+    
+    for p in p_values:
+        for d in d_values:
+            for q in q_values:
+                order=(p,d,q)
+                try:
+                    mse=evaluate_arima_model(dataset,order)
+                    if mse< best_score:
+                        best_score,best_cfg=mse,order
+                    print('ARIMAorder%s MSE=%.3F' % (order,mse))
+                except:
+                    continue
+    return best_cfg
+
+
+def evaluate_sarimax(series):
+    best_score=float('inf')
+    #defining the p,d,q parameters of range o to 2
+    p=d=q=range(0,2)
+    #generate all the different combinations of seasonal p d q
+    pdq=list(itertools.product(p,d,q))
+    seasonal_pdq=[(x[0],x[1],x[2],12) for x in list(itertools.product(p,d,q))]
+    warnings.filterwarnings('ignore')
+    for param in pdq:
+        for param_seasonal in seasonal_pdq:
+            try:
+                mod=sm.tsa.statespace.SARIMAX(series,
+                                              order=param,
+                                              seasonal_order=param_seasonal,
+                                              enforce_invertability=False)
+                results=mod.fit()
+                if results.aic<best_score:
+                    best_score,best_cfg,best_season=results.aic,param,param_seasonal
+                    print('SARIMAX{}x{}7 - AIC:{}'.format(param,param_seasonal,results.aic))
+            
+            except:
+                continue
+        return best_cfg,best_season
+    
+
+
+###declaring the global variable '
+        
+best_score,best_sfg,best_season=float('inf'),None,None
+
+##importing the data for forecasting#monthly wise data as the no of passedngers travelling in a month #forecast for another 12 months(1 year) how many passengers will travel
+
+df=pd.read_excel('international-airline-passengers.xlsx')
+
+df=pd.DataFrame(df)
+
+df.set_index(df.columns[0],inplace=True)
+
+max_date=df.index.max()
+
+###filling the data with the missing values in otder to make the data continuous in all intervals of time
+df=df.reset_index().ffill()
+
+df.set_index(df.columns[0],inplace=True)
+print(df)
+
+###specify the range of p,d,q values
+
+p_values=[0,1,2]
+d_values=range(0,3)
+q_values=range(0,3)
+
+datapoints=df[df.columns[0]].tolist()
+datapoints=np.float32(datapoints)
+
+print(datapoints)
+
+#model 
+
+try:
+    print('------SARIMAX---------')
+    best_cfg,best_season=evaluate_sarimax(datapoints)
+    timeseries_model_fit=sm.tsa.SARIMAX(datapoints,order=best_cfg,seasonal_order=best_season,enforce_invertability=False).fit()    
+    model_name='SARIMAX'
+except:
+    print('------ARIMA-----------')
+    best_cfg=evaluate_models(datapoints,p_values,d_values,q_values)
+    timeseries_model=ARIMA(datapoints,order=best_cfg)
+    timeseries_model_fit=timeseries_model.fit(disp=0,full_output=1,transparams=False)
+    model_name='ARIMA'
+    
+###predictions
+
+if(model_name=='ARIMA'):
+    n_steps=12
+    predict=timeseries_model_fit.forecast(n_steps)[0]
+else:
+    n_steps=12
+    predict=timeseries_model_fit.forecast(n_steps)
+    
+max_date=pd.to_datetime(max_date)
+
+###Assigning the value to the date
+print(predict)
+
+forecasted={}
+
+
+l=1
+
+while l<13:
+    net_date=(max_date + relativedelta(months=1))
+    print(net_date)
+    dddd={net_date:predict[l-1]}
+    forecasted.update(dddd)
+    l=l+1
+    
+print(forecasted)
+
+final_forecasted=pd.DataFrame()
+final_forecasted['Date']=forecasted.keys()
+final_forecasted['values']=forecasted.values()
+
+print(final_forecasted)
+
